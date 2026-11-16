@@ -158,8 +158,8 @@ export function updateWebChainsPhysics(
           const halfW = (c.cardWidth / 2) * cosA + (c.cardHeight / 2) * sinA;
 
           if (chain.id === 0) {
-            // Left chain cards stay strictly left of the center corridor
-            const maxAllowed = width * 0.50 - 25;
+            // Left chain: stays in the left third
+            const maxAllowed = width * (1 / 3) - 25;
             if (c.x + halfW > maxAllowed) {
               const push = c.x + halfW - maxAllowed;
               c.x -= push;
@@ -171,8 +171,22 @@ export function updateWebChainsPhysics(
               c.vx = Math.max(c.vx, 0);
             }
           } else if (chain.id === 1) {
-            // Right chain cards stay strictly right of the center corridor
-            const minAllowed = width * 0.50 + 25;
+            // Center chain: stays in the middle third
+            const minAllowed = width * (1 / 3) + 25;
+            const maxAllowed = width * (2 / 3) - 25;
+            if (c.x - halfW < minAllowed) {
+              const push = minAllowed - (c.x - halfW);
+              c.x += push;
+              c.vx = Math.max(c.vx, 0) + push * 0.08;
+            }
+            if (c.x + halfW > maxAllowed) {
+              const push = c.x + halfW - maxAllowed;
+              c.x -= push;
+              c.vx = Math.min(c.vx, 0) - push * 0.08;
+            }
+          } else {
+            // Right chain: stays in the right third
+            const minAllowed = width * (2 / 3) + 25;
             if (c.x - halfW < minAllowed) {
               const push = minAllowed - (c.x - halfW);
               c.x += push;

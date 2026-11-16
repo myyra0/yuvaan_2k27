@@ -16,11 +16,9 @@ function rollAngle(isDiamond: boolean): number {
   const sign = Math.random() < 0.5 ? -1 : 1;
   let mag: number;
   if (isDiamond) {
-    mag = 0.72 + (Math.random() - 0.5) * 0.16; // ~38° to 48° (Diamond slant)
+    mag = 0.55 + Math.random() * 0.35; // ~0.55 to 0.90
   } else {
-    const r = Math.random();
-    if (r < 0.6) mag = 0.38 + (Math.random() - 0.5) * 0.16; // ~18° to 27° (Expressive)
-    else mag = 0.22 + (Math.random() - 0.5) * 0.10; // ~11° to 17° (Mellow)
+    mag = 0.12 + Math.random() * 0.50; // ~0.12 to 0.62
   }
   return sign * mag;
 }
@@ -33,12 +31,12 @@ export function generateWebChains(
   width: number,
   isMobile: boolean
 ): GeneratedLayout {
-  const cardW = isMobile ? 240 : 280;
-  const cardH = isMobile ? 330 : 380;
+  const cardW = isMobile ? 258 : 300;
+  const cardH = isMobile ? 352 : 406;
   // Snug initial drop from ceiling so the first cards sit high and visible
   const topWebGap = isMobile ? 70 : 85;
 
-  // Prepare comic books data in defined issue order (1 to 10)
+  // Prepare comic books data in defined issue order
   const comicItems: ComicBookData[] = events.slice(0, 10).map((ev, idx) => {
     const theme = COMIC_THEMES[idx % COMIC_THEMES.length];
     return {
@@ -50,37 +48,11 @@ export function generateWebChains(
     };
   });
 
-  const leftAngles: number[] = [];
-  const rightAngles: number[] = [];
-  const leftOffsets: number[] = [];
-  const rightOffsets: number[] = [];
-
-  // Stagger diamond placements between left and right so their shapes are completely unsynchronized
-  // Left chain has diamonds at index 1 and 3; Right chain has diamonds at index 0 and 2
-  for (let i = 0; i < 5; i++) {
-    const lAngle = rollAngle(i === 1 || i === 3);
-    let rAngle = rollAngle(i === 0 || i === 2);
-
-    // 1. Ensure NON-PARALLEL
-    if (Math.sign(lAngle) === Math.sign(rAngle) && Math.abs(lAngle - rAngle) < 0.28) {
-      rAngle = -rAngle;
-    }
-
-    // 2. Ensure NON-COMPLEMENTARY
-    if (Math.abs(lAngle + rAngle) < 0.16) {
-      if (Math.abs(lAngle) > 0.5) {
-        rAngle = Math.sign(rAngle) * (0.24 + Math.random() * 0.12);
-      } else {
-        rAngle = Math.sign(rAngle) * (0.68 + Math.random() * 0.18);
-      }
-    }
-
-    leftAngles.push(lAngle);
-    rightAngles.push(rAngle);
-
-    leftOffsets.push(Math.sign(lAngle) * (55 + Math.random() * 45));
-    rightOffsets.push(Math.sign(rAngle) * (55 + Math.random() * 45));
-  }
+  // Group events by day so each web holds events from a single day
+  const dayOrder = ["Day 1", "Day 2", "Day 3"];
+  const dayGroups: ComicBookData[][] = dayOrder.map((day) =>
+    comicItems.filter((ci) => ci.event.day === day).slice(0, 3)
+  );
 
   const chains: WebChain[] = [];
 
@@ -110,17 +82,27 @@ export function generateWebChains(
       let restX = anchorX + offset;
       if (!isMobile) {
         if (chainIdx === 0) {
-          // Left chain right edge cannot cross center corridor
-          const maxAllowed = width * 0.50 - 25;
+          // Left chain right edge cannot cross left corridor
+          const maxAllowed = width * (1 / 3) - 25;
           if (restX + halfW > maxAllowed) {
             restX = maxAllowed - halfW;
           }
           if (restX - halfW < 20) {
             restX = 20 + halfW;
           }
+        } else if (chainIdx === 1) {
+          // Center chain stays within the middle column
+          const minAllowed = width * (1 / 3) + 25;
+          const maxAllowed = width * (2 / 3) - 25;
+          if (restX - halfW < minAllowed) {
+            restX = minAllowed + halfW;
+          }
+          if (restX + halfW > maxAllowed) {
+            restX = maxAllowed - halfW;
+          }
         } else {
-          // Right chain left edge cannot cross center corridor
-          const minAllowed = width * 0.50 + 25;
+          // Right chain left edge cannot cross right corridor
+          const minAllowed = width * (2 / 3) + 25;
           if (restX - halfW < minAllowed) {
             restX = minAllowed + halfW;
           }
@@ -131,7 +113,7 @@ export function generateWebChains(
       }
 
       // Web Gap: snug top drop, generous inter-card silk
-      const webGap = idx === 0 ? topWebGap : Math.round(240 + Math.random() * 50);
+      const webGap = idx === 0 ? topWebGap : Math.round(160 + Math.random() * 160);
       currentRestY += webGap + cardH / 2;
       const restY = currentRestY;
 
@@ -185,23 +167,33 @@ export function generateWebChains(
   };
 
   if (isMobile) {
-    // Mobile: 1 centered hanging chain of 10 books in defined order (Issues 1 to 10)
+    // Mobile: 1 centered hanging chain of up to 10 books in defined order
     const mobileAngles: number[] = [];
     const mobileOffsets: number[] = [];
-    for (let i = 0; i < 10; i++) {
+    const mobileItems = comicItems.slice(0, 10);
+    for (let i = 0; i < mobileItems.length; i++) {
       const sign = i % 2 === 0 ? -1 : 1;
       const isDiamond = i % 3 === 1;
       const mag = isDiamond ? 0.68 + Math.random() * 0.20 : 0.32 + Math.random() * 0.18;
       mobileAngles.push(sign * mag);
       mobileOffsets.push(sign * (45 + Math.random() * 35));
     }
-    initChain(0, comicItems, 0.5, mobileAngles, mobileOffsets);
+    initChain(0, mobileItems, 0.5, mobileAngles, mobileOffsets);
   } else {
-    // Desktop: 2 balanced chains in defined order:
-    // Left Chain: Issues 1 to 5
-    // Right Chain: Issues 6 to 10
-    initChain(0, comicItems.slice(0, 5), 0.30, leftAngles, leftOffsets);
-    initChain(1, comicItems.slice(5, 10), 0.70, rightAngles, rightOffsets);
+    // Desktop: 3 chains, one per day, 3 events each
+    const anchors = [1 / 6, 1 / 2, 5 / 6];
+    for (let c = 0; c < 3; c++) {
+      const group = dayGroups[c];
+      if (!group || group.length === 0) continue;
+      const chainAngles: number[] = [];
+      const chainOffsets: number[] = [];
+      for (let i = 0; i < group.length; i++) {
+        const isDiamond = Math.random() < 0.35;
+        chainAngles.push(rollAngle(isDiamond));
+        chainOffsets.push((Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 90));
+      }
+      initChain(c, group, anchors[c], chainAngles, chainOffsets);
+    }
   }
 
   const maxChainY = Math.max(
