@@ -135,8 +135,14 @@ const sectorColors = [
 
 const tracks: Record<number, string> = {
   1: "monza",
-  2: "monza",
-  3: "monza",
+  2: "spa",
+  3: "suzuka",
+};
+
+const trackNames: Record<number, string> = {
+  1: "MONZA",
+  2: "SPA-FRANCORCHAMPS",
+  3: "SUZUKA",
 };
 
 export default function SchedulePage() {
@@ -226,7 +232,7 @@ export default function SchedulePage() {
             <h2>THE TRACK<span>.</span></h2>
           </div>
 
-          <span className={styles.trackName}>MONZA</span>
+          <span className={styles.trackName}>{trackNames[activeDay]}</span>
         </div>
 
         <div className={styles.trackContainer}>
