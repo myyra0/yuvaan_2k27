@@ -1,12 +1,7 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { EventItem } from "@/lib/data/festivalData";
-import {
-  PlaceholderLeftPage,
-  PlaceholderRightPage,
-  stopAllPlaceholderVideos,
-} from "./PlaceholderSpread";
 
 export interface ComicBookData {
   event: EventItem;
@@ -25,7 +20,16 @@ export interface OpenComicBookModalProps {
   rightPageChildren?: React.ReactNode;
 }
 
-const ENABLE_PLACEHOLDER_VIDEOS = true;
+const OPEN_MS = 760;
+const CLOSE_MS = 600;
+/** Let the closed cover register before the swing starts. */
+const OPEN_HOLD_MS = 50;
+
+const CLOSED_BOOK_TRANSFORM = "translateX(-25%)";
+const OPEN_BOOK_TRANSFORM = "translateX(0)";
+
+const halftone = (alpha: number) =>
+  `radial-gradient(rgba(28, 25, 23, ${alpha}) 1.5px, transparent 1.5px)`;
 
 export function OpenComicBookModal({
   event,
@@ -37,11 +41,13 @@ export function OpenComicBookModal({
 }: OpenComicBookModalProps) {
   const [displayedEvent, setDisplayedEvent] = useState<EventItem | null>(event);
   const [displayedComic, setDisplayedComic] = useState<ComicBookData | null>(comicData);
+  const [coverOpen, setCoverOpen] = useState(false);
+  // Keeps the book on screen for the length of the closing swing.
+  const [isClosing, setIsClosing] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMounted = isOpen || isClosing;
 
-  // States: "closed" -> "prologue-flipping" -> "opened" -> "closing"
-  const [bookState, setBookState] = useState<"closed" | "prologue-flipping" | "opened" | "closing">("closed");
-  const [turningPage, setTurningPage] = useState<number>(0);
-
+  // Keep the last issue on screen while the cover swings shut.
   if (event && event !== displayedEvent) {
     setDisplayedEvent(event);
   }
@@ -49,63 +55,11 @@ export function OpenComicBookModal({
     setDisplayedComic(comicData);
   }
 
-  const [isMounted, setIsMounted] = useState(isOpen);
-  const openTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
-    if (isOpen && isMounted) {
-      if (closeTimerRef.current) {
-        clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-      openTimersRef.current.forEach(clearTimeout);
-
-      const resetTimer = setTimeout(() => {
-        setBookState("closed");
-        setTurningPage(0);
-      }, 0);
-
-      // Perfectly paced timing intervals for opening prologue pages
-      const t1 = setTimeout(() => {
-        setBookState("prologue-flipping");
-        setTurningPage(1);
-      }, 70);
-      const t2 = setTimeout(() => setTurningPage(2), 190);
-      const t3 = setTimeout(() => setTurningPage(3), 310);
-      const t4 = setTimeout(() => setTurningPage(4), 430);
-      const t5 = setTimeout(() => setTurningPage(5), 550);
-      const t6 = setTimeout(() => setTurningPage(6), 670);
-      const t7 = setTimeout(() => {
-        setTurningPage(0);
-        setBookState("opened");
-      }, 800);
-
-      openTimersRef.current = [resetTimer, t1, t2, t3, t4, t5, t6, t7];
-
-      return () => {
-        openTimersRef.current.forEach(clearTimeout);
-      };
-    } else if (!isOpen && isMounted) {
-      openTimersRef.current.forEach(clearTimeout);
-      const resetTimer = setTimeout(() => {
-        setBookState("closed");
-        setTurningPage(0);
-      }, 0);
-      const unmountTimer = setTimeout(() => {
-        setIsMounted(false);
-      }, 20);
-
-      return () => {
-        clearTimeout(resetTimer);
-        clearTimeout(unmountTimer);
-      };
-    }
-  }, [isOpen, isMounted]);
-
-  if (isOpen && !isMounted) {
-    setIsMounted(true);
-  }
+    if (!isOpen) return;
+    const holdTimer = setTimeout(() => setCoverOpen(true), OPEN_HOLD_MS);
+    return () => clearTimeout(holdTimer);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isMounted) return;
@@ -117,20 +71,21 @@ export function OpenComicBookModal({
   }, [isMounted]);
 
   const handleClose = useCallback(() => {
-    if (ENABLE_PLACEHOLDER_VIDEOS) {
-      stopAllPlaceholderVideos();
-    }
-    // Instantly switch to closing state so pages hide immediately without lingering
-    openTimersRef.current.forEach(clearTimeout);
-    setBookState("closing");
-    setTurningPage(0);
-
+    setCoverOpen(false);
+    setIsClosing(true);
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     closeTimerRef.current = setTimeout(() => {
-      setIsMounted(false);
+      closeTimerRef.current = null;
+      setIsClosing(false);
       onClose();
-    }, 250);
+    }, CLOSE_MS);
   }, [onClose]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isMounted) return;
@@ -146,26 +101,23 @@ export function OpenComicBookModal({
 
   if (!isMounted || !displayedEvent || !displayedComic) return null;
 
-  const isClosed = bookState === "closed" || bookState === "closing";
-  const isOpened = bookState === "opened";
-  const isFlippingPrologue = bookState === "prologue-flipping" && !isClosed;
+  const duration = coverOpen ? OPEN_MS : CLOSE_MS;
+  const coverEase = coverOpen
+    ? "cubic-bezier(0.33, 0.05, 0.16, 1)"
+    : "cubic-bezier(0.4, 0.05, 0.55, 1)";
+  const bookEase = "cubic-bezier(0.33, 1, 0.68, 1)";
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Comic Book Spread"
+      aria-label={`${displayedEvent.title} rulebook`}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 lg:p-8 select-none"
-      style={{
-        backgroundColor: "rgba(0, 0, 0, 0.88)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-      }}
+      style={{ backgroundColor: "rgba(0, 0, 0, 0.95)" }}
       onClick={handleClose}
     >
       <div
-        className="relative w-full max-w-5xl flex flex-col items-center"
-        style={{ perspective: "3000px" }}
+        className="relative flex w-full max-w-5xl flex-col items-center"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Control Bar */}
@@ -180,119 +132,163 @@ export function OpenComicBookModal({
           </button>
         </div>
 
-        {/* 2-Page Comic Spread Container */}
+        {/* Stage holds the perspective so the cover hinges around the spine. */}
         <div
-          className="relative w-full flex flex-row items-stretch rounded-2xl md:rounded-3xl border-4 border-[#1C1917] bg-[#FFFDF7] shadow-[14px_22px_0px_#0C0A09]"
+          className="relative w-full"
           style={{
-            transformStyle: "preserve-3d",
-            minHeight: "540px",
-            height: "min(680px, calc(86vh - 40px))",
-            transform: isClosed ? "scale(0.85) rotateX(8deg)" : "scale(1) rotateX(0deg)",
-            transition: "transform 350ms cubic-bezier(0.25, 1, 0.5, 1)",
-            overflow: "hidden",
-            willChange: "transform",
+            perspective: "2400px",
+            perspectiveOrigin: "50% 45%",
+            height: "clamp(320px, min(calc(100dvh - 150px), 88vw), 660px)",
           }}
         >
-          {/* Halftone Texture Overlay */}
           <div
-            className="absolute inset-0 pointer-events-none opacity-5 mix-blend-multiply z-10 rounded-2xl md:rounded-3xl"
+            className="absolute inset-0"
             style={{
-              backgroundImage:
-                "radial-gradient(#000 1.5px, transparent 1.5px), radial-gradient(#000 1.5px, transparent 1.5px)",
-              backgroundSize: "16px 16px",
-              backgroundPosition: "0 0, 8px 8px",
-            }}
-          />
-
-          {/* Left Page (Hidden instantly on closing) */}
-          <div
-            className="relative flex-1 bg-[#FFFDF7] border-r border-[#1C1917]/25 rounded-l-2xl md:rounded-l-3xl p-4 sm:p-6 flex flex-col justify-center overflow-y-auto"
-            style={{
-              transformOrigin: "right center",
               transformStyle: "preserve-3d",
-              transition: "transform 350ms cubic-bezier(0.25, 1, 0.5, 1), opacity 300ms ease",
-              transform: isOpened ? "rotateY(0deg)" : "rotateY(90deg)",
-              opacity: isOpened && !isClosed ? 1 : 0,
-              willChange: "transform, opacity",
-            }}
-          >
-            {leftPageChildren ?? (ENABLE_PLACEHOLDER_VIDEOS ? <PlaceholderLeftPage /> : null)}
-          </div>
-
-          {/* Center Spine Crease & Binding Staples */}
-          <div className="relative w-6 sm:w-8 flex flex-col justify-between items-center py-8 pointer-events-none bg-gradient-to-r from-black/15 via-black/30 to-black/15 border-x border-[#1C1917]/25 shadow-inner z-30">
-            <div className="w-1.5 h-6 rounded-sm bg-[#E2E8F0] border border-[#0F172A] shadow-sm" />
-            <div className="w-[1px] h-full bg-[#1C1917]/40 my-3" />
-            <div className="w-1.5 h-6 rounded-sm bg-[#E2E8F0] border border-[#0F172A] shadow-sm" />
-          </div>
-
-          {/* Right Page (Hidden instantly on closing) */}
-          <div
-            className="relative flex-1 bg-[#FFFDF7] border-l border-[#1C1917]/25 rounded-r-2xl md:rounded-r-3xl p-4 sm:p-6 flex flex-col justify-center overflow-y-auto"
-            style={{
-              transformOrigin: "left center",
-              transformStyle: "preserve-3d",
-              transition: "transform 350ms cubic-bezier(0.25, 1, 0.5, 1), opacity 300ms ease",
-              transform: isOpened ? "rotateY(0deg)" : "rotateY(-90deg)",
-              opacity: isOpened && !isClosed ? 1 : 0,
-              willChange: "transform, opacity",
-            }}
-          >
-            {rightPageChildren ?? (ENABLE_PLACEHOLDER_VIDEOS ? <PlaceholderRightPage /> : null)}
-          </div>
-
-          {/* 6 Opening Prologue Pages Flipping Across Spine */}
-          {isFlippingPrologue && turningPage > 0 && (
-            <div
-              className="absolute top-0 bottom-0 w-1/2 bg-[#FFF3CD] border-2 border-[#1C1917] rounded-r-2xl z-40 flex items-center justify-center shadow-2xl"
-              style={{
-                left: "50%",
-                transformOrigin: "left center",
-                transform: `rotateY(${
-                  turningPage === 1 ? -25 : turningPage === 2 ? -52 : turningPage === 3 ? -80 : turningPage === 4 ? -110 : turningPage === 5 ? -142 : -172
-                }deg)`,
-                transition: "transform 110ms cubic-bezier(0.25, 1, 0.5, 1)",
-                backfaceVisibility: "hidden",
-                backgroundImage: "radial-gradient(#1C1917 1.5px, transparent 1.5px)",
-                backgroundSize: "14px 14px",
-                willChange: "transform",
-              }}
-            >
-              <div className="bg-[#1C1917] text-[#FFCC00] px-3 py-1 font-black text-xs uppercase border border-[#FFCC00] shadow-[2px_2px_0px_#EF4444]">
-                PROLOGUE PAGE {turningPage}/6...
-              </div>
-            </div>
-          )}
-
-          {/* Front Cover Leaf */}
-          <div
-            className="absolute inset-y-0 left-0 w-1/2 bg-[#FF4500] border-4 border-[#1C1917] rounded-l-2xl md:rounded-l-3xl z-50 flex flex-col justify-between p-8 shadow-2xl"
-            style={{
-              transformOrigin: "left center",
-              transformStyle: "preserve-3d",
-              transition: "transform 400ms cubic-bezier(0.25, 1, 0.5, 1)",
-              transform: isOpened || isFlippingPrologue ? "rotateY(-180deg)" : "rotateY(0deg)",
-              pointerEvents: isOpened ? "none" : "auto",
-              backgroundImage: "radial-gradient(#1C1917 1.5px, transparent 1.5px)",
-              backgroundSize: "16px 16px",
+              transform: coverOpen ? OPEN_BOOK_TRANSFORM : CLOSED_BOOK_TRANSFORM,
+              transition: `transform ${duration}ms ${bookEase} 0ms`,
               willChange: "transform",
             }}
           >
-            <div className="bg-[#FFCC00] border-2 border-[#1C1917] px-3 py-1 font-black text-xs uppercase self-start shadow-[3px_3px_0px_#1C1917] text-[#1C1917]">
-              YUVAAN &apos;27 • ISSUE #{displayedComic.issueNumber.toString().padStart(2, "0")}
+            {/* Soft ambient shadow — a gradient, so no page-shaped dark
+                rectangle can ever appear mid-swing. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+              style={{
+                transformOrigin: "right center",
+                transform: coverOpen
+                  ? "translate(12px, 18px) scaleX(1) translateZ(-40px)"
+                  : "translate(12px, 18px) scaleX(0.5) translateZ(-40px)",
+                transition: `transform ${duration}ms ${bookEase} 0ms`,
+                background:
+                  "radial-gradient(58% 52% at 50% 55%, rgba(0, 0, 0, 0.6), transparent 72%)",
+              }}
+            />
+
+            {/* Page block seen edge-on behind the right page. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 right-0 w-1/2"
+              style={{ transform: "translateZ(-2px)" }}
+            >
+              {[13, 9, 5].map((offset, index) => (
+                <div
+                  key={offset}
+                  className="absolute inset-0 rounded-r-2xl border-[3px] border-[#1C1917]"
+                  style={{
+                    transform: `translate(${offset}px, ${offset}px)`,
+                    backgroundColor: ["#D6CCB2", "#E4DCC6", "#F1EADA"][index],
+                  }}
+                />
+              ))}
             </div>
-            <div className="text-center my-auto">
-              <h1 className="text-3xl sm:text-4xl font-black uppercase text-[#FFFDF7] tracking-wider drop-shadow-[3px_3px_0px_#1C1917] mb-2">
-                {displayedEvent.title}
-              </h1>
-              <p className="text-xs sm:text-sm font-black text-[#FFCC00] uppercase tracking-widest bg-[#1C1917] inline-block px-3 py-1 border border-[#FFCC00] shadow-[2px_2px_0px_#000]">
-                {displayedComic.burstText}
-              </p>
+
+            {/* Right Page: the first page of the rulebook. It sits still while
+                the cover swings off it. */}
+            <section className="absolute inset-y-0 right-0 w-1/2 overflow-hidden rounded-r-2xl md:rounded-r-3xl border-4 border-[#1C1917] bg-[#FFFDF7] p-3 sm:p-5">
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 left-0 w-10"
+                style={{
+                  background:
+                    "linear-gradient(to right, rgba(28, 25, 23, 0.3), transparent)",
+                }}
+              />
+              <div className="relative flex h-full flex-col">
+                {rightPageChildren}
+              </div>
+            </section>
+
+            {/* The leaf is the front cover AND the left page: the left page is
+                painted on its front, the cover art on its back. Opening the
+                cover is literally turning the left page into place, so no
+                layer ever fades in or out. */}
+            <div
+              className="absolute inset-y-0 left-0 w-1/2"
+              style={{
+                transformStyle: "preserve-3d",
+                transformOrigin: "right center",
+                transform: `translateZ(1px) rotateY(${coverOpen ? 0 : 180}deg)`,
+                transition: `transform ${duration}ms ${coverEase} 0ms`,
+                willChange: "transform",
+              }}
+            >
+              {/* Front of the leaf = left page (visible once the book is open). */}
+              <section
+                className="absolute inset-0 overflow-hidden rounded-l-2xl md:rounded-l-3xl border-4 border-[#1C1917] bg-[#FFFDF7] p-3 sm:p-5"
+                style={{
+                  backfaceVisibility: "hidden",
+                  backgroundImage: halftone(0.16),
+                  backgroundSize: "18px 18px",
+                }}
+              >
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 right-0 w-10"
+                  style={{
+                    background:
+                      "linear-gradient(to left, rgba(28, 25, 23, 0.3), transparent)",
+                  }}
+                />
+                <div className="relative flex h-full flex-col">
+                  {leftPageChildren}
+                </div>
+              </section>
+
+              {/* Back of the leaf = the cover the reader sees while shut. */}
+              <div
+                className="absolute inset-0 overflow-hidden rounded-r-2xl md:rounded-r-3xl border-4 border-[#1C1917] bg-[#FF4500]"
+                style={{
+                  backfaceVisibility: "hidden",
+                  transform: "rotateY(180deg)",
+                  backgroundImage: halftone(0.22),
+                  backgroundSize: "16px 16px",
+                }}
+              >
+                <div
+                  aria-hidden
+                  className="absolute inset-y-0 left-0 w-12"
+                  style={{
+                    background:
+                      "linear-gradient(to right, rgba(28, 25, 23, 0.35), transparent)",
+                  }}
+                />
+                <div
+                  aria-hidden
+                  className="absolute inset-0"
+                  style={{
+                    background:
+                      "linear-gradient(108deg, rgba(255, 255, 255, 0.24), transparent 40%, rgba(0, 0, 0, 0.16))",
+                  }}
+                />
+                <div className="relative flex h-full flex-col justify-between p-4 sm:p-6 md:p-8">
+                  <span className="w-fit whitespace-nowrap border-2 border-[#1C1917] bg-[#FFCC00] px-2 py-1 text-[9px] font-black uppercase tracking-wider text-[#1C1917] shadow-[3px_3px_0px_#1C1917] sm:px-2.5 sm:text-xs">
+                    YUVAAN &apos;27 • ISSUE #
+                    {displayedComic.issueNumber.toString().padStart(2, "0")}
+                  </span>
+                  <div className="text-center">
+                    <h2 className="mb-2 text-xl font-black uppercase leading-[0.95] tracking-wide text-[#FFFDF7] [text-shadow:3px_3px_0_#1C1917] sm:text-3xl md:text-4xl">
+                      {displayedEvent.title}
+                    </h2>
+                    <p className="inline-block border border-[#FFCC00] bg-[#1C1917] px-3 py-1 text-[9px] font-black uppercase tracking-widest text-[#FFCC00] shadow-[2px_2px_0px_#000] sm:text-xs">
+                      {displayedComic.burstText}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-wider text-white sm:text-xs">
+                    <span>UNFOLDING BOOK...</span>
+                    <span aria-hidden>&rarr;</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center justify-between text-white font-black text-xs uppercase">
-              <span>UNFOLDING BOOK...</span>
-              <span>&rarr;</span>
-            </div>
+
+            {/* Spine crease, above both pages and the cover edge. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 left-1/2 w-3 sm:w-4 border-x border-[#1C1917]/35 bg-gradient-to-r from-[#1C1917]/45 via-[#1C1917]/10 to-[#1C1917]/45"
+              style={{ transform: "translateX(-50%) translateZ(2px)" }}
+            />
           </div>
         </div>
       </div>
